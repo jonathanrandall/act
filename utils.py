@@ -27,18 +27,21 @@ class EpisodicDataset(torch.utils.data.Dataset):
         dataset_path = os.path.join(self.dataset_dir, f'episode_{episode_id}.hdf5')
         with h5py.File(dataset_path, 'r') as root:
             is_sim = root.attrs['sim']
-            original_action_shape = root['/action'].shape
+            original_action_shape = root['/action'].shape 
             episode_len = original_action_shape[0]
             if sample_full_episode:
                 start_ts = 0
             else:
-                start_ts = np.random.choice(episode_len)
+                start_ts = np.random.choice(episode_len) 
             # get observation at start_ts only
             qpos = root['/observations/qpos'][start_ts]
             # qvel = root['/observations/qvel'][start_ts]
             image_dict = dict()
-            for cam_name in self.camera_names:
-                image_dict[cam_name] = root[f'/observations/images/{cam_name}'][start_ts]
+            for cam_name in self.camera_names: #check if there are enough images available.
+                if len(root[f'/observations/images/{cam_name}']) > start_ts:
+                    image_dict[cam_name] = root[f'/observations/images/{cam_name}'][start_ts]
+                else:
+                    image_dict[cam_name] = root[f'/observations/images/{cam_name}'][-1]
             # get all actions after and including start_ts
             if is_sim:
                 action = root['/action'][start_ts:]
@@ -87,8 +90,10 @@ def get_norm_stats(dataset_dir, num_episodes):
             action = root['/action'][()]
         all_qpos_data.append(torch.from_numpy(qpos))
         all_action_data.append(torch.from_numpy(action))
-    all_qpos_data = torch.stack(all_qpos_data)
-    all_action_data = torch.stack(all_action_data)
+    all_qpos_data = torch.vstack(all_qpos_data) #added this line here
+    all_qpos_data = torch.stack([all_qpos_data])
+    all_action_data = torch.vstack(all_action_data) #added this line here
+    all_action_data = torch.stack([all_action_data])
     all_action_data = all_action_data
 
     # normalize action data

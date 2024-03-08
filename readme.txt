@@ -1,0 +1,2 @@
+python3 act/imitate_episodes.py --task_name wave_hello --ckpt_dir '/home/jonny/projects/aloha_world/ckpt_dir' --policy_class A
+CT --kl_weight 10 --chunk_size 100 --hidden_dim 512 --num_epochs 2000 --batch_size 4 --seed 42 -lr 1e-5 --dim_feedforward 512
