@@ -29,6 +29,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
             is_sim = root.attrs['sim']
             original_action_shape = root['/action'].shape 
             episode_len = original_action_shape[0]
+            # episode_len = 50# maximum size +5
             if sample_full_episode:
                 start_ts = 0
             else:
@@ -51,9 +52,12 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 action_len = episode_len - max(0, start_ts - 1) # hack, to make timesteps more aligned
 
         self.is_sim = is_sim
-        padded_action = np.zeros(original_action_shape, dtype=np.float32)
+        max_episode_dims = [50, 6] #to be consistent
+        # padded_action = np.zeros(original_action_shape, dtype=np.float32)
+        padded_action = np.zeros(max_episode_dims, dtype=np.float32)
         padded_action[:action_len] = action
-        is_pad = np.zeros(episode_len)
+        # is_pad = np.zeros(episode_len)
+        is_pad = np.zeros(max_episode_dims[0])
         is_pad[action_len:] = 1
 
         # new axis for different cameras

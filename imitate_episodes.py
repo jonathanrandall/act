@@ -10,9 +10,9 @@ from einops import rearrange
 
 from constants import DT
 from constants import PUPPET_GRIPPER_JOINT_OPEN
-from utils import load_data # data functions
-from utils import sample_box_pose, sample_insertion_pose # robot functions
-from utils import compute_dict_mean, set_seed, detach_dict # helper functions
+from act.utils import load_data # data functions
+from act.utils import sample_box_pose, sample_insertion_pose # robot functions
+from act.utils import compute_dict_mean, set_seed, detach_dict # helper functions
 from policy import ACTPolicy, CNNMLPPolicy
 from visualize_episodes import save_videos
 
@@ -24,14 +24,14 @@ e = IPython.embed
 def main(args):
     set_seed(1)
     # command line parameters
-    is_eval = args['eval']
-    ckpt_dir = args['ckpt_dir']
-    policy_class = args['policy_class']
-    onscreen_render = args['onscreen_render']
-    task_name = args['task_name']
-    batch_size_train = args['batch_size']
+    is_eval = args['eval'] #false
+    ckpt_dir = args['ckpt_dir'] #directory
+    policy_class = args['policy_class'] #ACT
+    onscreen_render = args['onscreen_render'] #false
+    task_name = args['task_name'] #wave_hello
+    batch_size_train = args['batch_size'] #4
     batch_size_val = args['batch_size']
-    num_epochs = args['num_epochs']
+    num_epochs = args['num_epochs'] #2000
 
     # get task parameters
     is_sim = task_name[:4] == 'sim_'
