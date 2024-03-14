@@ -8,13 +8,14 @@ import IPython
 e = IPython.embed
 
 class EpisodicDataset(torch.utils.data.Dataset):
-    def __init__(self, episode_ids, dataset_dir, camera_names, norm_stats):
+    def __init__(self, episode_ids, dataset_dir, camera_names, norm_stats,historical_length):
         super(EpisodicDataset).__init__()
         self.episode_ids = episode_ids
         self.dataset_dir = dataset_dir
         self.camera_names = camera_names
         self.norm_stats = norm_stats
         self.is_sim = None
+        self.hist_l = historical_length
         self.__getitem__(0) # initialize self.is_sim
 
     def __len__(self):
@@ -33,9 +34,20 @@ class EpisodicDataset(torch.utils.data.Dataset):
             if sample_full_episode:
                 start_ts = 0
             else:
-                start_ts = np.random.choice(episode_len) 
+                start_ts = np.random.choice(episode_len-2) 
             # get observation at start_ts only
             qpos = root['/observations/qpos'][start_ts]
+            # print(qpos)
+            hl = self.hist_l
+            # print(start_ts)
+            qpos = root['/observations/qpos'][:(start_ts+1)]
+            tmp = qpos[-hl:,:]
+            # print(hl, qpos, tmp)
+            qpos = np.tile(tmp[0], (hl,1))
+            qpos[-tmp.shape[0]:,:] = tmp
+            # qpos = qpos.reshape(1,-1)
+            
+            
             # qvel = root['/observations/qvel'][start_ts]
             image_dict = dict()
             for cam_name in self.camera_names: #check if there are enough images available.
@@ -45,11 +57,15 @@ class EpisodicDataset(torch.utils.data.Dataset):
                     image_dict[cam_name] = root[f'/observations/images/{cam_name}'][-1]
             # get all actions after and including start_ts
             if is_sim:
-                action = root['/action'][start_ts:]
+                action = root['/action'][start_ts:]                
                 action_len = episode_len - start_ts
             else:
-                action = root['/action'][max(0, start_ts - 1):] # hack, to make timesteps more aligned
-                action_len = episode_len - max(0, start_ts - 1) # hack, to make timesteps more aligned
+                # action = root['/action'][max(0, start_ts - 1):] # hack, to make timesteps more aligned                
+                # action_len = episode_len - max(0, start_ts - 1) # hack, to make timesteps more aligned
+
+                # action = root['/observations/qpos'][(start_ts+1):]
+                action = root['/action'][(start_ts+0):]
+                action_len = episode_len - max(0, start_ts +0)
 
         self.is_sim = is_sim
         max_episode_dims = [50, 6] #to be consistent
@@ -79,7 +95,9 @@ class EpisodicDataset(torch.utils.data.Dataset):
         image_data = image_data / 255.0
         action_data = (action_data - self.norm_stats["action_mean"]) / self.norm_stats["action_std"]
         qpos_data = (qpos_data - self.norm_stats["qpos_mean"]) / self.norm_stats["qpos_std"]
-
+        qpos_data = qpos_data.view(-1)
+        # print('qpos_data',qpos_data)
+        # exit()
         return image_data, qpos_data, action_data, is_pad
 
 
@@ -117,7 +135,7 @@ def get_norm_stats(dataset_dir, num_episodes):
     return stats
 
 
-def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val):
+def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val,historical_length=1):
     print(f'\nData from: {dataset_dir}\n')
     # obtain train test split
     train_ratio = 0.8
@@ -129,8 +147,8 @@ def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_s
     norm_stats = get_norm_stats(dataset_dir, num_episodes)
 
     # construct dataset and dataloader
-    train_dataset = EpisodicDataset(train_indices, dataset_dir, camera_names, norm_stats)
-    val_dataset = EpisodicDataset(val_indices, dataset_dir, camera_names, norm_stats)
+    train_dataset = EpisodicDataset(train_indices, dataset_dir, camera_names, norm_stats, historical_length=historical_length)
+    val_dataset = EpisodicDataset(val_indices, dataset_dir, camera_names, norm_stats, historical_length=historical_length)
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True, pin_memory=True, num_workers=1, prefetch_factor=1)
     val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val, shuffle=True, pin_memory=True, num_workers=1, prefetch_factor=1)
 

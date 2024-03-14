@@ -18,6 +18,9 @@ from visualize_episodes import save_videos
 
 from sim_env import BOX_POSE
 
+from modified_env import ModifiedEnv
+import time
+
 import IPython
 e = IPython.embed
 
@@ -32,7 +35,8 @@ def main(args):
     batch_size_train = args['batch_size'] #4
     batch_size_val = args['batch_size']
     num_epochs = args['num_epochs'] #2000
-
+    continue_training=args['continue_training']
+    historical_length=args['historical_length']
     # get task parameters
     is_sim = task_name[:4] == 'sim_'
     if is_sim:
@@ -65,6 +69,7 @@ def main(args):
                          'dec_layers': dec_layers,
                          'nheads': nheads,
                          'camera_names': camera_names,
+                         'historical_length' : historical_length,
                          }
     elif policy_class == 'CNNMLP':
         policy_config = {'lr': args['lr'], 'lr_backbone': lr_backbone, 'backbone' : backbone, 'num_queries': 1,
@@ -85,7 +90,9 @@ def main(args):
         'seed': args['seed'],
         'temporal_agg': args['temporal_agg'],
         'camera_names': camera_names,
-        'real_robot': not is_sim
+        'real_robot': not is_sim,
+        'continue_training' : continue_training,
+        'historical_length' : historical_length
     }
 
     if is_eval:
@@ -100,7 +107,7 @@ def main(args):
         print()
         exit()
 
-    train_dataloader, val_dataloader, stats, _ = load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val)
+    train_dataloader, val_dataloader, stats, _ = load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val, historical_length=historical_length)
 
     # save dataset stats
     if not os.path.isdir(ckpt_dir):
@@ -108,7 +115,7 @@ def main(args):
     stats_path = os.path.join(ckpt_dir, f'dataset_stats.pkl')
     with open(stats_path, 'wb') as f:
         pickle.dump(stats, f)
-
+    
     best_ckpt_info = train_bc(train_dataloader, val_dataloader, config)
     best_epoch, min_val_loss, best_state_dict = best_ckpt_info
 
@@ -159,8 +166,10 @@ def eval_bc(config, ckpt_name, save_episode=True):
     camera_names = config['camera_names']
     max_timesteps = config['episode_len']
     task_name = config['task_name']
-    temporal_agg = config['temporal_agg']
+    historical_length=config['historical_length']
+    temporal_agg = True #config['temporal_agg']
     onscreen_cam = 'angle'
+    
 
     # load policy and stats
     ckpt_path = os.path.join(ckpt_dir, ckpt_name)
@@ -179,10 +188,13 @@ def eval_bc(config, ckpt_name, save_episode=True):
 
     # load environment
     if real_robot:
-        from aloha.aloha_scripts.robot_utils import move_grippers # requires aloha
-        from aloha.aloha_scripts.real_env import make_real_env # requires aloha
-        env = make_real_env(init_node=True)
+        # from aloha.aloha_scripts.robot_utils import move_grippers # requires aloha
+        # from aloha.aloha_scripts.real_env import make_real_env # requires aloha
+        # env = make_real_env(init_node=True) #this needs to contain the publisher for the robot and the image publisher.
         env_max_reward = 0
+        #i'm using my modified environment, so I've commented out Tony's code.
+        env = ModifiedEnv()
+        time.sleep(3)
     else:
         from sim_env import make_sim_env
         env = make_sim_env(task_name)
@@ -195,7 +207,7 @@ def eval_bc(config, ckpt_name, save_episode=True):
 
     max_timesteps = int(max_timesteps * 1) # may increase for real-world tasks
 
-    num_rollouts = 50
+    num_rollouts = 1 #50
     episode_returns = []
     highest_rewards = []
     for rollout_id in range(num_rollouts):
@@ -225,6 +237,7 @@ def eval_bc(config, ckpt_name, save_episode=True):
         rewards = []
         with torch.inference_mode():
             for t in range(max_timesteps):
+                time.sleep(0.5)
                 ### update onscreen render and wait for DT
                 if onscreen_render:
                     image = env._physics.render(height=480, width=640, camera_id=onscreen_cam)
@@ -233,20 +246,37 @@ def eval_bc(config, ckpt_name, save_episode=True):
 
                 ### process previous timestep to get qpos and image_list
                 obs = ts.observation
+                # print('obs', obs)
                 if 'images' in obs:
                     image_list.append(obs['images'])
                 else:
                     image_list.append({'main': obs['image']})
-                qpos_numpy = np.array(obs['qpos'])
+                # print(obs['qpos'])
+                qpos_numpy = np.array(obs['qpos']).astype(float)
                 qpos = pre_process(qpos_numpy)
                 qpos = torch.from_numpy(qpos).float().cuda().unsqueeze(0)
+                
                 qpos_history[:, t] = qpos
                 curr_image = get_image(ts, camera_names)
+                #print for debug
+                # print("curr_image", curr_image.shape)
 
                 ### query policy
                 if config['policy_class'] == "ACT":
                     if t % query_frequency == 0:
+                        # print(qpos)
+                        hl = historical_length
+                        # print(qpos_history.shape)
+                        tmp = qpos_history[0,:(t+1)]
+                        tmp = (tmp[-hl:])#.squeeze(0)
+                        qpos = tmp[0].repeat(hl,1)
+                        # print(qpos.shape)
+                        # print(tmp.shape)
+
+                        qpos[-tmp.shape[0]:,:] = tmp
+                        qpos=qpos.view(1,-1)
                         all_actions = policy(qpos, curr_image)
+                        # print(all_actions)
                     if temporal_agg:
                         all_time_actions[[t], t:t+num_queries] = all_actions
                         actions_for_curr_step = all_time_actions[:, t]
@@ -266,12 +296,16 @@ def eval_bc(config, ckpt_name, save_episode=True):
 
                 ### post-process actions
                 raw_action = raw_action.squeeze(0).cpu().numpy()
+                # print(raw_action)
                 action = post_process(raw_action)
                 target_qpos = action
+                target_qpos = list(map(int, target_qpos))
+                target_qpos  = [min(max(x, 0), 1000) for x in target_qpos]
+                print('target',target_qpos)
 
                 ### step the environment
                 ts = env.step(target_qpos)
-
+                
                 ### for visualization
                 qpos_list.append(qpos_numpy)
                 target_qpos_list.append(target_qpos)
@@ -279,7 +313,7 @@ def eval_bc(config, ckpt_name, save_episode=True):
 
             plt.close()
         if real_robot:
-            move_grippers([env.puppet_bot_left, env.puppet_bot_right], [PUPPET_GRIPPER_JOINT_OPEN] * 2, move_time=0.5)  # open
+            # move_grippers([env.puppet_bot_left, env.puppet_bot_right], [PUPPET_GRIPPER_JOINT_OPEN] * 2, move_time=0.5)  # open
             pass
 
         rewards = np.array(rewards)
@@ -301,6 +335,8 @@ def eval_bc(config, ckpt_name, save_episode=True):
         summary_str += f'Reward >= {r}: {more_or_equal_r}/{num_rollouts} = {more_or_equal_r_rate*100}%\n'
 
     print(summary_str)
+    ts = env.reset()
+    time.sleep(0.1)
 
     # save success rate to txt
     result_file_name = 'result_' + ckpt_name.split('.')[0] + '.txt'
@@ -325,10 +361,16 @@ def train_bc(train_dataloader, val_dataloader, config):
     seed = config['seed']
     policy_class = config['policy_class']
     policy_config = config['policy_config']
+    continue_training = config['continue_training']
 
     set_seed(seed)
-
+    
     policy = make_policy(policy_class, policy_config)
+    #only use this line if lready run
+    if continue_training:
+        ckpt_path = os.path.join(ckpt_dir, 'policy_best.ckpt')
+        loading_status = policy.load_state_dict(torch.load(ckpt_path))
+        print(loading_status)
     policy.cuda()
     optimizer = make_optimizer(policy_class, policy) #returns self.optimizer
 
@@ -377,7 +419,7 @@ def train_bc(train_dataloader, val_dataloader, config):
             summary_string += f'{k}: {v.item():.3f} '
         print(summary_string)
 
-        if epoch % 100 == 0:
+        if epoch % 500 == 0:
             ckpt_path = os.path.join(ckpt_dir, f'policy_epoch_{epoch}_seed_{seed}.ckpt')
             torch.save(policy.state_dict(), ckpt_path)
             plot_history(train_history, validation_history, epoch, ckpt_dir, seed)
@@ -414,8 +456,10 @@ def plot_history(train_history, validation_history, num_epochs, ckpt_dir, seed):
 
 
 if __name__ == '__main__':
+    #se also get_args_parser in main.py
     parser = argparse.ArgumentParser()
     parser.add_argument('--eval', action='store_true')
+    parser.add_argument('--continue_training', action='store_true') #added to continue training
     parser.add_argument('--onscreen_render', action='store_true')
     parser.add_argument('--ckpt_dir', action='store', type=str, help='ckpt_dir', required=True)
     parser.add_argument('--policy_class', action='store', type=str, help='policy_class, capitalize', required=True)
@@ -424,9 +468,12 @@ if __name__ == '__main__':
     parser.add_argument('--seed', action='store', type=int, help='seed', required=True)
     parser.add_argument('--num_epochs', action='store', type=int, help='num_epochs', required=True)
     parser.add_argument('--lr', action='store', type=float, help='lr', required=True)
+    
 
     # for ACT
     parser.add_argument('--kl_weight', action='store', type=int, help='KL Weight', required=False)
+    parser.add_argument('--historical_length', default=1, action='store', type=int) # will be overridden
+    parser.add_argument('--history', default=1, action='store', type=int, help='position history', required=False)
     parser.add_argument('--chunk_size', action='store', type=int, help='chunk_size', required=False)
     parser.add_argument('--hidden_dim', action='store', type=int, help='hidden_dim', required=False)
     parser.add_argument('--dim_feedforward', action='store', type=int, help='dim_feedforward', required=False)
