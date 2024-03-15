@@ -10,4 +10,6 @@ ckpt_dir_2 with 10000 iterations action = root['/action'][(start_ts+0):] works b
 
 train ckpt_dir_3 with 7000 iterations action = root['/action'][(start_ts+0):] batch_size 16
 
-train ckpt_dir_3 with 8000 iterations action = root['/action'][(start_ts+0):] batch_size 4 and using 8 steps of history.
+train ckpt_dir_4 with 8000 iterations action = root['/action'][(start_ts+0):] batch_size 4 and using 8 steps of history.
+
+train ckpt_dir_5 with 7000 iterations action = root['/action'][(start_ts+0):] batch_size 4 and using 1 steps of history.

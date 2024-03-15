@@ -43,7 +43,7 @@ def main(args):
         from constants import SIM_TASK_CONFIGS
         task_config = SIM_TASK_CONFIGS[task_name]
     else:
-        from aloha.aloha_scripts.constants import TASK_CONFIGS
+        from constants_realrobot import TASK_CONFIGS
         task_config = TASK_CONFIGS[task_name]
     dataset_dir = task_config['dataset_dir']
     num_episodes = task_config['num_episodes']
@@ -207,10 +207,11 @@ def eval_bc(config, ckpt_name, save_episode=True):
 
     max_timesteps = int(max_timesteps * 1) # may increase for real-world tasks
 
-    num_rollouts = 1 #50
+    num_rollouts = 3 #50
     episode_returns = []
     highest_rewards = []
     for rollout_id in range(num_rollouts):
+        
         rollout_id += 0
         ### set task
         if 'sim_transfer_cube' in task_name:
@@ -237,7 +238,7 @@ def eval_bc(config, ckpt_name, save_episode=True):
         rewards = []
         with torch.inference_mode():
             for t in range(max_timesteps):
-                time.sleep(0.5)
+                time.sleep(0.75)
                 ### update onscreen render and wait for DT
                 if onscreen_render:
                     image = env._physics.render(height=480, width=640, camera_id=onscreen_cam)
@@ -282,7 +283,7 @@ def eval_bc(config, ckpt_name, save_episode=True):
                         actions_for_curr_step = all_time_actions[:, t]
                         actions_populated = torch.all(actions_for_curr_step != 0, axis=1)
                         actions_for_curr_step = actions_for_curr_step[actions_populated]
-                        k = 0.01
+                        k = 0.0025#0.01
                         exp_weights = np.exp(-k * np.arange(len(actions_for_curr_step)))
                         exp_weights = exp_weights / exp_weights.sum()
                         exp_weights = torch.from_numpy(exp_weights).cuda().unsqueeze(dim=1)
@@ -314,7 +315,8 @@ def eval_bc(config, ckpt_name, save_episode=True):
             plt.close()
         if real_robot:
             # move_grippers([env.puppet_bot_left, env.puppet_bot_right], [PUPPET_GRIPPER_JOINT_OPEN] * 2, move_time=0.5)  # open
-            pass
+            time.sleep(3)
+            # pass
 
         rewards = np.array(rewards)
         episode_return = np.sum(rewards[rewards!=None])

@@ -122,6 +122,7 @@ def main(args=None):
     # while True:
     #     img_d=t1.get_images()
     #     print(img_d['top'].size)
+    time.sleep(2)
     ts = t1.reset()
     # print(ts.observation)
 
